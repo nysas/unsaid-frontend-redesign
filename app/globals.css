@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/* ============ LIGHT THEME (default) ============ */
+:root {
+  --bg: #F7F1E6;           /* warm ivory */
+  --surface: #FBF7EE;      /* soft cream, slightly lighter for raised surfaces */
+  --surface-sunken: #EFE6D3; /* taupe-tinted sunken areas */
+  --border: #E1D4B8;       /* warm beige border */
+  --border-strong: #C9B892;
+
+  --ink: #2B2620;          /* deep espresso / charcoal text */
+  --ink-muted: #6B5F4E;    /* muted olive-brown for secondary text */
+  --ink-faint: #9A8C74;    /* caption / metadata */
+
+  --forest: #2F4A3A;       /* deep forest green — primary accent */
+  --forest-strong: #22362A;
+  --forest-tint: #E4EBE3;
+
+  --gold: #A9852F;         /* antique gold / brass — used sparingly */
+  --gold-tint: #F1E7CC;
+
+  --danger: #8C4A3C;       /* muted terracotta, not alarm-red */
+
+  --cta-bg: var(--forest);
+  --cta-text: #F7F1E6;
+
+  --grain-opacity: 0.035;
+}
+
+.dark {
+  --bg: #241B14;           /* deep espresso brown */
+  --surface: #2E2119;      /* dark chocolate brown, raised */
+  --surface-sunken: #1C140F;
+  --border: #4A3626;
+  --border-strong: #5E4630;
+
+  --ink: #F1E7D6;          /* warm cream text */
+  --ink-muted: #C9B79C;    /* muted beige secondary text */
+  --ink-faint: #93805F;
+
+  --forest: #6E9A80;       /* forest green, lifted for dark bg */
+  --forest-strong: #85B396;
+  --forest-tint: #2C3B31;
+
+  --gold: #C9A24B;         /* muted bronze / antique gold */
+  --gold-tint: #3A2E1C;
+
+  --danger: #C08268;
+
+  --cta-bg: var(--ink);
+  --cta-text: #241B14;
+
+  --grain-opacity: 0.05;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-forest: var(--forest);
+  --color-forest-strong: var(--forest-strong);
+  --color-forest-tint: var(--forest-tint);
+  --color-gold: var(--gold);
+  --color-gold-tint: var(--gold-tint);
+  --color-danger: var(--danger);
+  --color-cta-bg: var(--cta-bg);
+  --color-cta-text: var(--cta-text);
+
+  --font-display: var(--font-serif-stack);
+  --font-sans: var(--font-sans-stack);
+}
+
+:root {
+  --font-serif-stack: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-sans-stack: "Manrope", "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans-stack);
+  transition: background-color 0.4s ease, color 0.4s ease;
+  position: relative;
+}
+
+/* Subtle grain texture — barely perceptible, adds tactility */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.font-display {
+  font-family: var(--font-serif-stack);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: var(--forest);
+  color: var(--cta-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.divider {
+  border-top: 1px solid var(--border);
+}
+
+.eyebrow {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.wordmark-dot {
+  color: var(--forest);
+}
