@@ -1,250 +1,301 @@
 "use client";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { isSupabaseConfigured, supabase, friendlyError } from "@/lib/supabase";
+import * as api from "@/lib/api";
 import {
   Domain,
+  DomainQualification,
   MatchingPreference,
-  MyAnswer,
-  MyQuestion,
+  NotificationPrefs,
   ResponsePreference,
   User,
 } from "@/lib/types";
 
-const ACCOUNT_KEY = "unsaid-account-v1"; // { id, email, username } — survives logout
-const PROFILE_KEY = "unsaid-profile-v3"; // full User — survives logout
-const SESSION_KEY = "unsaid-session-v1"; // "1" | null — cleared on logout
+type Result = { ok: boolean; error?: string };
 
-interface Account {
-  id: string;
-  email: string;
-  username: string;
-}
-
-function newId() {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function blankUser(account: Account): User {
-  return {
-    id: account.id,
-    email: account.email,
-    username: account.username,
-    bio: "",
-    avatarSeed: account.username,
-    hasCompletedOnboarding: false,
-    asker: { active: false, questionsAsked: [] },
-    replier: { active: false, qualifications: [], perspectivesShared: [], helpfulRatings: 0 },
-  };
-}
+const DEFAULT_PREFS: NotificationPrefs = { answer: true, feedback: true, assessment: true, safety: true };
 
 interface ProfileContextValue {
   user: User | null;
   isLoggedIn: boolean;
+  /** true once the initial session check has finished (safe to redirect) */
   mounted: boolean;
-  signup: (input: { email: string; username: string }) => { ok: boolean; error?: string };
-  login: (input: { email: string }) => { ok: boolean; error?: string; user?: User };
-  logout: () => void;
-  resetPrototype: () => void;
-  completeOnboarding: (choice: "ask" | "help" | "both") => void;
-  activateAsker: () => void;
-  submitReplierAssessments: (domains: Domain[]) => void;
-  updateProfile: (patch: { username?: string; bio?: string; avatarSeed?: string }) => void;
+  configured: boolean;
+  refresh: () => Promise<void>;
+  signup: (input: { email: string; username: string; password: string }) => Promise<Result & { needsConfirmation?: boolean }>;
+  login: (input: { email: string; password: string }) => Promise<Result & { user?: User }>;
+  logout: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<Result>;
+  updatePassword: (password: string) => Promise<Result>;
+  deleteAccount: () => Promise<Result>;
+  completeOnboarding: (choice: "ask" | "help" | "both") => Promise<Result>;
+  activateAsker: () => Promise<Result>;
+  submitReplierAssessments: (
+    submissions: { domain: Domain; responses: { questionId: string; answer: string }[] }[]
+  ) => Promise<Result>;
+  updateProfile: (patch: { username?: string; bio?: string; avatarSeed?: string }) => Promise<Result>;
+  updateNotificationPrefs: (prefs: NotificationPrefs) => Promise<Result>;
   askQuestion: (input: {
     domain: Domain;
     body: string;
     isAnonymous: boolean;
     responsePreferences: ResponsePreference[];
     matchingPreference: MatchingPreference;
-  }) => void;
-  shareAnswer: (input: {
-    questionId: string;
-    domain: Domain;
-    body: string;
-    visibleOnProfile: boolean;
-  }) => void;
+  }) => Promise<Result & { id?: string }>;
+  shareAnswer: (input: { questionId: string; body: string; visibleOnProfile: boolean }) => Promise<Result>;
 }
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
-export function UserProfileProvider({ children }: { children: React.ReactNode }) {
-  // Always start logged out with no user, so server and client first render match.
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [mounted, setMounted] = useState(false);
+async function loadUser(session: Session): Promise<User> {
+  const sb = supabase();
+  const uid = session.user.id;
 
-  useEffect(() => {
-    const session = localStorage.getItem(SESSION_KEY);
-    const storedProfile = localStorage.getItem(PROFILE_KEY);
-    if (session === "1" && storedProfile) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing persisted client-only session on mount, required to avoid SSR mismatch
-      setUser(JSON.parse(storedProfile));
-      setIsLoggedIn(true);
+  const [profileRes, subsRes, myQuestions, myAnswers, feedback] = await Promise.all([
+    sb.from("profiles").select("*").eq("id", uid).single(),
+    sb.from("assessment_submissions").select("domain,status,submitted_at,reviewer_note").eq("user_id", uid),
+    api.fetchMyQuestions(),
+    api.fetchMyAnswers(),
+    api.fetchFeedbackReceived(),
+  ]);
+  if (profileRes.error) throw profileRes.error;
+  if (subsRes.error) throw subsRes.error;
+  const p = profileRes.data;
+
+  const qualifications: DomainQualification[] = (subsRes.data ?? []).map((s) => ({
+    domain: s.domain as Domain,
+    assessmentCompleted: true,
+    status: s.status,
+    completedAt: s.submitted_at,
+    reviewerNote: s.reviewer_note,
+  }));
+
+  return {
+    id: uid,
+    email: session.user.email ?? "",
+    username: p.username,
+    bio: p.bio,
+    avatarSeed: p.avatar_seed,
+    hasCompletedOnboarding: p.has_completed_onboarding,
+    isAdmin: p.is_admin,
+    notificationPrefs: { ...DEFAULT_PREFS, ...(p.notification_prefs ?? {}) },
+    asker: { active: p.asker_active, questionsAsked: myQuestions },
+    replier: {
+      active: p.replier_active,
+      qualifications,
+      perspectivesShared: myAnswers,
+      helpfulRatings: feedback.filter((f) => f.helpful).length,
+    },
+  };
+}
+
+export function UserProfileProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const sessionRef = useRef<Session | null>(null);
+
+  const hydrate = useCallback(async (session: Session | null) => {
+    sessionRef.current = session;
+    if (!session) {
+      setUser(null);
+      return null;
     }
-    setMounted(true);
+    try {
+      const u = await loadUser(session);
+      setUser(u);
+      return u;
+    } catch (err) {
+      console.error("Failed to load profile", err);
+      setUser(null);
+      return null;
+    }
   }, []);
 
   useEffect(() => {
-    if (!mounted || !user) return;
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(user));
-  }, [user, mounted]);
-
-  function signup(input: { email: string; username: string }): { ok: boolean; error?: string } {
-    const existingAccount = localStorage.getItem(ACCOUNT_KEY);
-    if (existingAccount) {
-      return { ok: false, error: "An account already exists on this device. Try logging in instead." };
+    if (!isSupabaseConfigured) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- nothing to load without a backend
+      setMounted(true);
+      return;
     }
-    const account: Account = { id: newId(), email: input.email.trim(), username: input.username.trim() };
-    const fresh = blankUser(account);
-    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(fresh));
-    localStorage.setItem(SESSION_KEY, "1");
-    setUser(fresh);
-    setIsLoggedIn(true);
-    return { ok: true };
-  }
+    const sb = supabase();
+    let cancelled = false;
 
-  function login(input: { email: string }): { ok: boolean; error?: string; user?: User } {
-    const storedAccount = localStorage.getItem(ACCOUNT_KEY);
-    const storedProfile = localStorage.getItem(PROFILE_KEY);
-    if (!storedAccount || !storedProfile) {
-      return { ok: false, error: "No account found on this device. Sign up first." };
-    }
-    const account: Account = JSON.parse(storedAccount);
-    if (account.email.toLowerCase() !== input.email.trim().toLowerCase()) {
-      return { ok: false, error: "That email doesn't match the account on this device." };
-    }
-    const profile: User = JSON.parse(storedProfile);
-    localStorage.setItem(SESSION_KEY, "1");
-    setUser(profile);
-    setIsLoggedIn(true);
-    return { ok: true, user: profile };
-  }
+    sb.auth.getSession().then(async ({ data }) => {
+      await hydrate(data.session);
+      if (!cancelled) setMounted(true);
+    });
 
-  function logout() {
-    localStorage.removeItem(SESSION_KEY);
-    setUser(null);
-    setIsLoggedIn(false);
-  }
-
-  function resetPrototype() {
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(ACCOUNT_KEY);
-    localStorage.removeItem(PROFILE_KEY);
-    setUser(null);
-    setIsLoggedIn(false);
-  }
-
-  function completeOnboarding(choice: "ask" | "help" | "both") {
-    setUser((u) =>
-      u
-        ? {
-            ...u,
-            hasCompletedOnboarding: true,
-            asker: { ...u.asker, active: choice === "ask" || choice === "both" ? true : u.asker.active },
+    const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
+      // Defer: calling Supabase inside this callback synchronously can deadlock.
+      setTimeout(() => {
+        if (event === "SIGNED_OUT") {
+          sessionRef.current = null;
+          setUser(null);
+        } else if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+          if (session?.user.id !== sessionRef.current?.user.id || event === "USER_UPDATED") {
+            void hydrate(session);
           }
-        : u
-    );
-  }
+        } else if (session) {
+          sessionRef.current = session;
+        }
+      }, 0);
+    });
 
-  function activateAsker() {
-    setUser((u) => (u ? { ...u, asker: { ...u.asker, active: true } } : u));
-  }
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [hydrate]);
 
-  function submitReplierAssessments(domains: Domain[]) {
-    setUser((u) => {
-      if (!u) return u;
-      const now = new Date().toISOString();
-      return {
-        ...u,
-        replier: {
-          ...u.replier,
-          active: true,
-          qualifications: [
-            ...u.replier.qualifications.filter((q) => !domains.includes(q.domain)),
-            ...domains.map((domain) => ({ domain, assessmentCompleted: true, completedAt: now })),
-          ],
+  const refresh = useCallback(async () => {
+    if (sessionRef.current) await hydrate(sessionRef.current);
+  }, [hydrate]);
+
+  /** Run a mutation, refresh the user, and translate errors. */
+  const run = useCallback(
+    async (fn: () => Promise<unknown>, fallback?: string): Promise<Result> => {
+      try {
+        await fn();
+        await refresh();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: friendlyError(err, fallback) };
+      }
+    },
+    [refresh]
+  );
+
+  const updateOwnProfile = (patch: Record<string, unknown>) => async () => {
+    const uid = sessionRef.current?.user.id;
+    if (!uid) throw new Error("Not signed in");
+    const { error } = await supabase().from("profiles").update(patch).eq("id", uid);
+    if (error) throw error;
+  };
+
+  async function signup(input: { email: string; username: string; password: string }) {
+    try {
+      const username = input.username.trim();
+      if (!(await api.usernameAvailable(username))) {
+        return { ok: false, error: "That username is taken (or uses characters other than letters, numbers, _ and .)." };
+      }
+      const { data, error } = await supabase().auth.signUp({
+        email: input.email.trim(),
+        password: input.password,
+        options: {
+          data: { username },
+          emailRedirectTo: `${window.location.origin}/onboarding`,
         },
-      };
-    });
+      });
+      if (error) throw error;
+      // Supabase returns a user with no identities when the email is already registered.
+      if (data.user && data.user.identities?.length === 0) {
+        return { ok: false, error: "An account with that email already exists. Try logging in." };
+      }
+      if (!data.session) return { ok: true, needsConfirmation: true };
+      await hydrate(data.session);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: friendlyError(err) };
+    }
   }
 
-  function updateProfile(patch: { username?: string; bio?: string; avatarSeed?: string }) {
-    setUser((u) =>
-      u
-        ? {
-            ...u,
-            username: patch.username ?? u.username,
-            bio: patch.bio ?? u.bio,
-            avatarSeed: patch.avatarSeed ?? u.avatarSeed,
-          }
-        : u
-    );
+  async function login(input: { email: string; password: string }) {
+    try {
+      const { data, error } = await supabase().auth.signInWithPassword({
+        email: input.email.trim(),
+        password: input.password,
+      });
+      if (error) throw error;
+      const u = await hydrate(data.session);
+      if (!u) return { ok: false, error: "Signed in, but your profile couldn't be loaded. Try again." };
+      return { ok: true, user: u };
+    } catch (err) {
+      return { ok: false, error: friendlyError(err) };
+    }
   }
 
-  function askQuestion(input: {
-    domain: Domain;
-    body: string;
-    isAnonymous: boolean;
-    responsePreferences: ResponsePreference[];
-    matchingPreference: MatchingPreference;
-  }) {
-    setUser((u) => {
-      if (!u) return u;
-      const question: MyQuestion = {
-        id: `mine-${newId()}`,
-        domain: input.domain,
-        body: input.body,
-        isAnonymous: input.isAnonymous,
-        responsePreferences: input.responsePreferences,
-        matchingPreference: input.matchingPreference,
-        createdAt: new Date().toISOString(),
-        answerCount: 0,
-      };
-      return { ...u, asker: { ...u.asker, questionsAsked: [question, ...u.asker.questionsAsked] } };
-    });
+  async function logout() {
+    await supabase().auth.signOut();
+    sessionRef.current = null;
+    setUser(null);
   }
 
-  function shareAnswer(input: {
-    questionId: string;
-    domain: Domain;
-    body: string;
-    visibleOnProfile: boolean;
-  }) {
-    setUser((u) => {
-      if (!u) return u;
-      const answer: MyAnswer = {
-        id: `mine-${newId()}`,
-        questionId: input.questionId,
-        domain: input.domain,
-        body: input.body,
-        createdAt: new Date().toISOString(),
-        visibleOnProfile: input.visibleOnProfile,
-        helpfulCount: 0,
-      };
-      return {
-        ...u,
-        replier: { ...u.replier, perspectivesShared: [answer, ...u.replier.perspectivesShared] },
-      };
+  async function requestPasswordReset(email: string): Promise<Result> {
+    const { error } = await supabase().auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
     });
+    return error ? { ok: false, error: friendlyError(error) } : { ok: true };
   }
+
+  async function updatePassword(password: string): Promise<Result> {
+    const { error } = await supabase().auth.updateUser({ password });
+    return error ? { ok: false, error: friendlyError(error) } : { ok: true };
+  }
+
+  async function deleteAccount(): Promise<Result> {
+    try {
+      await api.deleteMyAccount();
+      sessionRef.current = null;
+      setUser(null);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: friendlyError(err) };
+    }
+  }
+
+  const value: ProfileContextValue = {
+    user,
+    isLoggedIn: !!user,
+    mounted,
+    configured: isSupabaseConfigured,
+    refresh,
+    signup,
+    login,
+    logout,
+    requestPasswordReset,
+    updatePassword,
+    deleteAccount,
+    completeOnboarding: (choice) =>
+      run(
+        updateOwnProfile({
+          has_completed_onboarding: true,
+          ...(choice === "ask" || choice === "both" ? { asker_active: true } : {}),
+        })
+      ),
+    activateAsker: () => run(updateOwnProfile({ asker_active: true })),
+    submitReplierAssessments: (subs) =>
+      run(async () => {
+        for (const s of subs) await api.submitAssessment(s.domain, s.responses);
+      }, "Couldn't save your assessment. Your answers are still here — try again."),
+    updateProfile: (patch) =>
+      run(
+        updateOwnProfile({
+          ...(patch.username !== undefined ? { username: patch.username.trim() } : {}),
+          ...(patch.bio !== undefined ? { bio: patch.bio.trim() } : {}),
+          ...(patch.avatarSeed !== undefined ? { avatar_seed: patch.avatarSeed } : {}),
+        }),
+        "Couldn't save. Usernames must be 3–24 letters, numbers, _ or . and not already taken."
+      ),
+    updateNotificationPrefs: (prefs) => run(() => api.updateNotificationPrefs(prefs)),
+    askQuestion: async (input) => {
+      let id: string | undefined;
+      const res = await run(async () => {
+        id = await api.createQuestion(input);
+      });
+      return { ...res, id };
+    },
+    shareAnswer: (input) => run(() => api.createAnswer(input)),
+  };
 
   return (
-    <ProfileContext.Provider
-      value={{
-        user,
-        isLoggedIn,
-        mounted,
-        signup,
-        login,
-        logout,
-        resetPrototype,
-        completeOnboarding,
-        activateAsker,
-        submitReplierAssessments,
-        updateProfile,
-        askQuestion,
-        shareAnswer,
-      }}
-    >
+    <ProfileContext.Provider value={value}>
+      {!isSupabaseConfigured && (
+        <div className="border-b border-danger bg-surface px-5 py-3 text-center text-sm text-danger">
+          Backend not configured — copy <code>.env.example</code> to <code>.env.local</code> and add your
+          Supabase URL and key (see README).
+        </div>
+      )}
       {children}
     </ProfileContext.Provider>
   );

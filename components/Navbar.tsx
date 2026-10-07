@@ -1,5 +1,8 @@
 "use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Bell } from "lucide-react";
+import { unreadNotificationCount } from "@/lib/api";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import AnonymousMark from "@/components/AnonymousMark";
@@ -9,8 +12,29 @@ import { useProfile } from "@/components/UserProfileProvider";
 export default function Navbar() {
   const pathname = usePathname();
   const { user } = useProfile();
+  const [unread, setUnread] = useState(0);
   const isHelp = pathname.startsWith("/replier");
   const isYou = pathname.startsWith("/you");
+
+  // Poll the unread count; refresh on navigation and when the inbox is opened.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = () =>
+      unreadNotificationCount()
+        .then((n) => alive && setUnread(n))
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 60_000);
+    window.addEventListener("unsaid:notifications-read", load);
+    window.addEventListener("focus", load);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      window.removeEventListener("unsaid:notifications-read", load);
+      window.removeEventListener("focus", load);
+    };
+  }, [user, pathname]);
 
   return (
     <header className="border-b border-border">
@@ -51,6 +75,18 @@ export default function Navbar() {
 
         <div className="flex items-center gap-4">
           <ThemeSwitcher />
+          <Link
+            href="/notifications"
+            aria-label={unread > 0 ? `${unread} unread notifications` : "Notifications"}
+            className="relative text-ink-muted transition-colors hover:text-ink"
+          >
+            <Bell size={18} />
+            {unread > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-forest px-1 text-[10px] leading-none text-white">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
+          </Link>
           <Link
             href="/you"
             aria-label="You"

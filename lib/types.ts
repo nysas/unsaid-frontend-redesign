@@ -47,46 +47,63 @@ export const MATCHING_PREFERENCES: MatchingPreference[] = [
   "No preference",
 ];
 
+export type QualificationStatus = "submitted" | "qualified" | "not_qualified";
+
 /**
- * A replier's status in a single domain. No scoring/evaluation exists yet —
- * a domain is either not assessed, or the assessment has been completed and
- * is awaiting a qualification decision that isn't implemented yet.
+ * A replier's status in a single domain. Submitting an assessment lets you
+ * help in that domain right away; a human reviewer (admin panel) can later
+ * mark it qualified (shows a badge) or not qualified (removes access).
  */
 export interface DomainQualification {
   domain: Domain;
   assessmentCompleted: boolean;
+  status: QualificationStatus;
   completedAt?: string;
+  reviewerNote?: string | null;
 }
 
-/** Community reputation for OTHER (mock) repliers shown in the public feed. */
 export interface Reputation {
   average: number; // 0-5
   ratingsCount: number;
   helpfulPercent: number;
 }
 
-/** A question the current user actually asked during this session. */
-export interface MyQuestion {
+/** A question as anyone may see it. Never carries the author's id. */
+export interface Question {
   id: string;
   domain: Domain;
   body: string;
   isAnonymous: boolean;
+  authorUsername: string | null; // null when anonymous
   responsePreferences: ResponsePreference[];
   matchingPreference: MatchingPreference;
   createdAt: string;
-  answerCount: number; // real, starts at 0 — no fabricated replies
+  answerCount: number;
+  status: "visible" | "hidden" | "removed";
+  isMine: boolean;
 }
 
-/** A perspective the current user actually shared on a (mock) community question. */
-export interface MyAnswer {
+/** A perspective as anyone may see it. */
+export interface Answer {
   id: string;
   questionId: string;
   domain: Domain;
+  replierUsername: string;
+  replierAvatarSeed: string;
+  isQualified: boolean;
+  domains: Domain[]; // domains the replier is qualified in
+  reputation: Reputation | null;
   body: string;
   createdAt: string;
+  helpfulCount: number;
   visibleOnProfile: boolean;
-  helpfulCount: number; // real, starts at 0
+  status: "visible" | "hidden" | "removed";
+  isMine: boolean;
+  myFeedback: boolean | null; // what the viewer said, if anything
 }
+
+export type MyQuestion = Question;
+export type MyAnswer = Answer;
 
 export interface AskerProfile {
   active: boolean;
@@ -100,7 +117,14 @@ export interface ReplierProfile {
   helpfulRatings: number;
 }
 
-/** The real, signed-in user. No hardcoded demo data lives on this shape. */
+export interface NotificationPrefs {
+  answer: boolean;
+  feedback: boolean;
+  assessment: boolean;
+  safety: boolean;
+}
+
+/** The signed-in user, assembled from several tables. */
 export interface User {
   id: string;
   email: string;
@@ -108,36 +132,32 @@ export interface User {
   bio: string;
   avatarSeed: string;
   hasCompletedOnboarding: boolean;
+  isAdmin: boolean;
+  notificationPrefs: NotificationPrefs;
   asker: AskerProfile;
   replier: ReplierProfile;
 }
 
-/** A question from the public/mock community feed — not the current user's own. */
-export interface Question {
+export interface ReceivedFeedback {
   id: string;
-  domain: Domain;
-  body: string;
-  isAnonymous: boolean;
-  authorUsername: string; // used only if !isAnonymous
-  responsePreferences: ResponsePreference[];
-  matchingPreference: MatchingPreference;
+  answerId: string;
+  helpful: boolean;
+  rating: number | null;
+  categories: string[];
+  note: string | null;
   createdAt: string;
-  answerCount: number;
 }
 
-/** An answer from a (mock) community replier — not the current user's own. */
-export interface Answer {
-  id: string;
-  questionId: string;
-  replierUsername: string;
-  replierAvatarSeed: string;
-  isQualified: boolean;
-  domains: Domain[];
-  reputation: Reputation | null;
-  body: string;
-  createdAt: string;
-  helpfulCount: number;
-  visibleOnProfile: boolean;
+export interface PublicProfile {
+  username: string;
+  bio: string;
+  avatarSeed: string;
+  replierActive: boolean;
+  qualifiedDomains: Domain[];
+  assessedDomains: Domain[];
+  answersCount: number;
+  reputation: (Reputation & { helpfulCount: number }) | null;
+  perspectives: { id: string; domain: Domain; body: string; createdAt: string; helpfulCount: number }[];
 }
 
 export const FEEDBACK_CATEGORIES = [
@@ -151,6 +171,7 @@ export const FEEDBACK_CATEGORIES = [
 
 export interface Notification {
   id: string;
+  link: string | null;
   type:
     | "answer"
     | "reply"
@@ -170,3 +191,12 @@ export interface AssessmentQuestionT {
   question: string;
   options?: string[];
 }
+
+export const REPORT_REASONS = [
+  "Contains identifying information",
+  "Harassment or bullying",
+  "Unhelpful / dismissive",
+  "Spam or self-promotion",
+  "Someone may be in danger",
+  "Something else",
+] as const;

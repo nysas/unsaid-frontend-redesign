@@ -11,17 +11,33 @@ import { Domain } from "@/lib/types";
 export default function AnswerComposer({
   questionId,
   domain,
+  isOwnQuestion,
+  alreadyAnswered,
+  onPosted,
 }: {
   questionId: string;
   domain: Domain;
+  isOwnQuestion: boolean;
+  alreadyAnswered: boolean;
+  onPosted: () => void;
 }) {
   const { user, isLoggedIn, mounted, shareAnswer } = useProfile();
   const [value, setValue] = useState("");
   const [posted, setPosted] = useState(false);
   const [open, setOpen] = useState(false);
   const [showOnProfile, setShowOnProfile] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!mounted) return null;
+  if (isOwnQuestion) {
+    return (
+      <p className="border border-dashed border-border py-4 text-center text-sm text-ink-faint">
+        This is your question. You&apos;ll get a notification when someone shares a perspective.
+      </p>
+    );
+  }
+  if (alreadyAnswered && !posted) return null;
 
   if (!isLoggedIn) {
     return (
@@ -37,6 +53,37 @@ export default function AnswerComposer({
         <Link href="/become-replier" className="text-forest">Become a Replier</Link> to share a perspective here.
       </div>
     );
+  }
+
+  const domainAccess = user?.replier.qualifications.find((q) => q.domain === domain);
+  if (!domainAccess || domainAccess.status === "not_qualified") {
+    return (
+      <div className="border border-dashed border-border py-4 text-center text-sm text-ink-faint">
+        {domainAccess ? (
+          <>You can share perspectives in your other domains.</>
+        ) : (
+          <>
+            <Link href={`/assessment?domains=${encodeURIComponent(domain)}`} className="text-forest">
+              Take the {domain} assessment
+            </Link>{" "}
+            to share a perspective here.
+          </>
+        )}
+      </div>
+    );
+  }
+
+  async function post() {
+    setSending(true);
+    setError(null);
+    const res = await shareAnswer({ questionId, body: value, visibleOnProfile: showOnProfile });
+    setSending(false);
+    if (!res.ok) {
+      setError(res.error ?? "Couldn't post your perspective.");
+      return;
+    }
+    setPosted(true);
+    onPosted();
   }
 
   if (posted) {
@@ -96,15 +143,9 @@ export default function AnswerComposer({
         )}
       </div>
 
-      <Button
-        disabled={value.trim().length < 20}
-        onClick={() => {
-          shareAnswer({ questionId, domain, body: value, visibleOnProfile: showOnProfile });
-          setPosted(true);
-        }}
-        className="self-start"
-      >
-        Post Perspective
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <Button disabled={value.trim().length < 20 || sending} onClick={post} className="self-start">
+        {sending ? "Posting…" : "Post Perspective"}
       </Button>
     </div>
   );

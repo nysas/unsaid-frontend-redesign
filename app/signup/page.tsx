@@ -15,22 +15,47 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!username.trim() || !email.trim() || password.length < 8) {
       setError("Fill in an email, username, and an 8+ character password.");
       return;
     }
+    if (!/^[A-Za-z0-9_.]{3,24}$/.test(username)) {
+      setError("Usernames are 3–24 characters: letters, numbers, _ or .");
+      return;
+    }
     setSubmitting(true);
-    const result = signup({ email, username });
+    const result = await signup({ email, username, password });
+    setSubmitting(false);
     if (!result.ok) {
-      setSubmitting(false);
       setError(result.error ?? "Something went wrong.");
       return;
     }
+    if (result.needsConfirmation) {
+      setSentTo(email.trim());
+      return;
+    }
     router.push("/onboarding");
+  }
+
+  if (sentTo) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center px-5 py-16">
+        <div className="w-full max-w-sm text-center">
+          <p className="mb-3 font-display text-3xl text-ink">Check your inbox.</p>
+          <p className="text-ink-muted">
+            We sent a confirmation link to <span className="text-ink">{sentTo}</span>. Open it on this
+            device to finish setting up.
+          </p>
+          <Divider className="my-8" />
+          <Link href="/login" className="eyebrow text-forest">Back to log in</Link>
+        </div>
+      </main>
+    );
   }
 
   return (

@@ -27,20 +27,28 @@ function ResultContent({ user }: { user: User }) {
             {recentlyCompleted.map((q) => (
               <div key={q.domain} className="flex items-center justify-between py-3">
                 <span className="text-sm text-ink">{q.domain}</span>
-                <span className="eyebrow text-gold">Assessment completed</span>
+                <span className="eyebrow text-gold">
+                  {q.status === "qualified" ? "Qualified" : q.status === "not_qualified" ? "Reviewed" : "Submitted · in review"}
+                </span>
               </div>
             ))}
           </div>
         )}
 
         <p className="mb-10 text-sm text-ink-faint">
-          Qualification results will appear here later. You can check back on
-          your profile any time.
+          You can start sharing perspectives in these domains right away. A reviewer
+          will read your answers, and once you&apos;re marked Qualified your perspectives
+          show a badge. We&apos;ll notify you.
         </p>
 
-        <Link href="/you">
-          <Button size="lg">Back to You →</Button>
-        </Link>
+        <div className="flex flex-wrap gap-4">
+          <Link href="/replier/questions">
+            <Button size="lg">See who needs a perspective →</Button>
+          </Link>
+          <Link href="/you">
+            <Button size="lg" variant="secondary">Back to You</Button>
+          </Link>
+        </div>
       </div>
     </main>
   );

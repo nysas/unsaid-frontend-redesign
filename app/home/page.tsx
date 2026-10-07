@@ -8,20 +8,24 @@ import QuestionBlock from "@/components/QuestionBlock";
 import { AskerGate } from "@/components/ProfileGate";
 import AuthGate from "@/components/AuthGate";
 import { useProfile } from "@/components/UserProfileProvider";
-import { mockQuestions } from "@/lib/mock-data";
+import { EmptyState } from "@/components/EmptyState";
+import { Loading, LoadError } from "@/components/LoadState";
+import { fetchFeed } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { User } from "@/lib/types";
 
 function HomeContent({ user }: { user: User }) {
   const { activateAsker } = useProfile();
   const router = useRouter();
-  const [featured, ...rest] = mockQuestions;
+  const feed = useAsync(fetchFeed, []);
+  const [featured, ...rest] = feed.data ?? [];
 
   if (!user.asker.active) {
     return (
       <main>
         <Navbar />
         <div className="mx-auto max-w-3xl px-5 sm:px-8">
-          <AskerGate onActivate={activateAsker} />
+          <AskerGate onActivate={() => void activateAsker()} />
         </div>
       </main>
     );
@@ -59,9 +63,19 @@ function HomeContent({ user }: { user: User }) {
         <section>
           <p className="eyebrow mb-10 text-forest">Things people haven&apos;t said out loud.</p>
 
+          {feed.loading && <Loading />}
+          {feed.error && <LoadError message={feed.error} onRetry={feed.reload} />}
+          {!feed.loading && !feed.error && !featured && (
+            <EmptyState
+              title="It's quiet in here"
+              description="No one has asked anything yet. Be the first — it's anonymous."
+            />
+          )}
+          {featured && (
           <div className="mb-14">
             <QuestionBlock question={featured} size="lg" />
           </div>
+          )}
 
           <div className="flex flex-col">
             {rest.map((q, i) => (

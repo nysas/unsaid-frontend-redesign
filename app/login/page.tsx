@@ -9,16 +9,31 @@ import { useProfile } from "@/components/UserProfileProvider";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useProfile();
+  const { login, requestPasswordReset } = useProfile();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function forgot() {
+    setError(null);
+    setNotice(null);
+    if (!email.trim()) {
+      setError("Enter your email above first.");
+      return;
+    }
+    const res = await requestPasswordReset(email);
+    if (res.ok) setNotice("If that email has an account, a reset link is on its way.");
+    else setError(res.error ?? "Couldn't send a reset link.");
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setSubmitting(true);
-    const result = login({ email });
+    const result = await login({ email, password });
     if (!result.ok) {
       setSubmitting(false);
       setError(result.error ?? "Something went wrong.");
@@ -46,8 +61,19 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <Input label="Password" type="password" placeholder="••••••••" required />
+          <Input
+            label="Password"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <button type="button" onClick={forgot} className="-mt-3 self-end text-xs text-ink-faint hover:text-ink">
+            Forgot password?
+          </button>
           {error && <p className="text-sm text-danger">{error}</p>}
+          {notice && <p className="text-sm text-forest">{notice}</p>}
           <Button type="submit" disabled={submitting} className="mt-2 w-full">
             {submitting ? "Logging in…" : "Log In"}
           </Button>

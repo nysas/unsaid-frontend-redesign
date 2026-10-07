@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Question } from "@/lib/types";
-import { timeAgo } from "@/lib/mock-data";
+import { timeAgo } from "@/lib/format";
 
 export default function QuestionBlock({
   question,

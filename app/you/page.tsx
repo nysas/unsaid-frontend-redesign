@@ -10,18 +10,29 @@ import EditProfileModal from "@/components/EditProfileModal";
 import AuthGate from "@/components/AuthGate";
 import { useProfile } from "@/components/UserProfileProvider";
 import { DOMAINS, User } from "@/lib/types";
-import { timeAgo } from "@/lib/mock-data";
+import { timeAgo } from "@/lib/format";
+import { fetchFeedbackReceived, setAnswerVisibility } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 
 function YouContent({ user }: { user: User }) {
-  const { activateAsker } = useProfile();
+  const { activateAsker, refresh } = useProfile();
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
+  const notes = useAsync(
+    () => (user.replier.active ? fetchFeedbackReceived() : Promise.resolve([])),
+    [user.replier.active, user.replier.helpfulRatings]
+  );
+  const kindWords = (notes.data ?? []).filter((f) => f.note).slice(0, 5);
+
+  async function toggleVisibility(id: string, visible: boolean) {
+    await setAnswerVisibility(id, visible);
+    await refresh();
+  }
 
   const { asker, replier } = user;
   const unassessedDomains = DOMAINS.filter(
     (d) => !replier.qualifications.some((q) => q.domain === d)
   );
-  const visiblePerspectives = replier.perspectivesShared.filter((a) => a.visibleOnProfile);
 
   return (
     <main>
@@ -39,12 +50,16 @@ function YouContent({ user }: { user: User }) {
             )}
           </div>
         </div>
-        <button
-          onClick={() => setEditOpen(true)}
-          className="mt-4 eyebrow text-forest hover:opacity-75"
-        >
-          Edit profile →
-        </button>
+        <div className="mt-4 flex gap-6">
+          <button onClick={() => setEditOpen(true)} className="eyebrow text-forest hover:opacity-75">
+            Edit profile →
+          </button>
+          {replier.active && (
+            <Link href={`/u/${user.username}`} className="eyebrow text-ink-faint hover:text-ink">
+              View public profile
+            </Link>
+          )}
+        </div>
 
         <div className="my-12">
           <Divider />
@@ -72,7 +87,7 @@ function YouContent({ user }: { user: User }) {
             ) : (
               <>
                 <p className="mb-3 text-sm text-ink-muted">Want to ask something?</p>
-                <button onClick={activateAsker} className="eyebrow text-forest hover:opacity-75">
+                <button onClick={() => void activateAsker()} className="eyebrow text-forest hover:opacity-75">
                   Start Asking →
                 </button>
               </>
@@ -122,15 +137,16 @@ function YouContent({ user }: { user: User }) {
             {asker.questionsAsked.length > 0 ? (
               <div className="flex flex-col divide-y divide-border">
                 {asker.questionsAsked.map((q) => (
-                  <div key={q.id} className="py-4">
+                  <Link key={q.id} href={`/question/${q.id}`} className="group block py-4">
                     <span className="eyebrow text-forest">{q.domain}</span>
-                    <p className="mt-2 text-[15px] leading-relaxed text-ink">
+                    {q.status !== "visible" && <span className="ml-2 eyebrow text-danger">In review</span>}
+                    <p className="mt-2 text-[15px] leading-relaxed text-ink transition-colors group-hover:text-forest">
                       &ldquo;{q.body.length > 140 ? q.body.slice(0, 140).trim() + "…" : q.body}&rdquo;
                     </p>
                     <p className="mt-2 eyebrow text-ink-faint">
-                      {q.answerCount} perspectives · {timeAgo(q.createdAt)}
+                      {q.answerCount} perspective{q.answerCount === 1 ? "" : "s"} · {timeAgo(q.createdAt)}
                     </p>
-                  </div>
+                  </Link>
                 ))}
               </div>
             ) : (
@@ -177,21 +193,44 @@ function YouContent({ user }: { user: User }) {
                 {replier.perspectivesShared.length} perspective{replier.perspectivesShared.length === 1 ? "" : "s"} shared
               </p>
             </div>
+            {kindWords.length > 0 && (
+              <div className="mt-8 flex flex-col gap-4">
+                <p className="eyebrow text-ink-faint">What people said</p>
+                {kindWords.map((f) => (
+                  <p key={f.id} className="font-display italic text-ink-muted">&ldquo;{f.note}&rdquo;</p>
+                ))}
+              </div>
+            )}
 
             <div className="my-12">
               <Divider />
             </div>
 
             <p className="eyebrow mb-6 text-forest">Perspectives I&apos;ve shared</p>
-            {visiblePerspectives.length > 0 ? (
+            {replier.perspectivesShared.length > 0 ? (
               <div className="flex flex-col divide-y divide-border">
-                {visiblePerspectives.map((a) => (
+                {replier.perspectivesShared.map((a) => (
                   <div key={a.id} className="py-6">
-                    <p className="eyebrow mb-2 text-ink-faint">Anonymous · {a.domain}</p>
-                    <p className="mb-3 text-[15px] leading-relaxed text-ink">
-                      &ldquo;{a.body.length > 160 ? a.body.slice(0, 160).trim() + "…" : a.body}&rdquo;
+                    <p className="eyebrow mb-2 text-ink-faint">
+                      {a.domain}
+                      {a.status !== "visible" && <span className="ml-2 text-danger">In review</span>}
                     </p>
-                    <span className="eyebrow text-ink-faint">{a.helpfulCount} people found this helpful</span>
+                    <Link href={`/question/${a.questionId}`} className="block">
+                      <p className="mb-3 text-[15px] leading-relaxed text-ink hover:text-forest">
+                        &ldquo;{a.body.length > 160 ? a.body.slice(0, 160).trim() + "…" : a.body}&rdquo;
+                      </p>
+                    </Link>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                      <span className="eyebrow text-ink-faint">
+                        {a.helpfulCount} {a.helpfulCount === 1 ? "person" : "people"} found this helpful
+                      </span>
+                      <button
+                        onClick={() => void toggleVisibility(a.id, !a.visibleOnProfile)}
+                        className="eyebrow text-forest hover:opacity-75"
+                      >
+                        {a.visibleOnProfile ? "Shown on profile · hide" : "Private · show on profile"}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import clsx from "clsx";
 import Navbar from "@/components/Navbar";
 import Button from "@/components/Button";
@@ -21,7 +22,30 @@ import {
 const PII_PATTERN =
   /(@[a-z0-9._]+\.(com|edu|net)|\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b|instagram\.com|snapchat)/i;
 
+// Gentle check for crisis language. Never blocks posting — it just makes sure
+// the person sees real, immediate help alongside peer perspectives.
+const CRISIS_PATTERN =
+  /\b(kill myself|end my life|suicid\w*|want to die|don'?t want to (live|be here)|self[- ]?harm|cut myself|hurt myself|no reason to live)\b/i;
+
 type Step = "write" | "preview" | "posted";
+
+function CrisisNote() {
+  return (
+    <div className="border border-gold bg-gold-tint px-5 py-4 text-sm leading-relaxed text-ink">
+      <p className="font-medium">You don&apos;t have to carry this alone.</p>
+      <p className="mt-1 text-ink-muted">
+        Peers here can listen, but if you&apos;re thinking about hurting yourself, please also talk to someone
+        trained right now. In India, <strong>Tele-MANAS</strong> is free and open 24/7 at{" "}
+        <a href="tel:14416" className="text-forest underline">14416</a>. If you&apos;re in immediate danger, call{" "}
+        <a href="tel:112" className="text-forest underline">112</a>. Outside India,{" "}
+        <a href="https://findahelpline.com" target="_blank" rel="noreferrer" className="text-forest underline">
+          findahelpline.com
+        </a>{" "}
+        lists services near you.
+      </p>
+    </div>
+  );
+}
 
 function AskContent({ user }: { user: User }) {
   const { askQuestion } = useProfile();
@@ -32,8 +56,12 @@ function AskContent({ user }: { user: User }) {
   const [anonymous, setAnonymous] = useState(true);
   const [matching, setMatching] = useState<MatchingPreference>("No preference");
   const [checking, setChecking] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postError, setPostError] = useState<string | null>(null);
+  const [postedId, setPostedId] = useState<string | null>(null);
 
   const hasPII = useMemo(() => PII_PATTERN.test(body), [body]);
+  const showCrisis = useMemo(() => CRISIS_PATTERN.test(body), [body]);
   const canContinue = domain && body.trim().length > 10 && !hasPII;
   const hasStartedWriting = body.trim().length > 0;
 
@@ -76,6 +104,11 @@ function AskContent({ user }: { user: User }) {
                   <p className="mt-3 text-sm text-danger">
                     This might make you identifiable. Take a look before you continue.
                   </p>
+                )}
+                {showCrisis && (
+                  <div className="mt-4">
+                    <CrisisNote />
+                  </div>
                 )}
               </div>
             </div>
@@ -212,23 +245,35 @@ function AskContent({ user }: { user: User }) {
 
             <Divider />
 
+            {showCrisis && <CrisisNote />}
+            {postError && <p className="text-sm text-danger">{postError}</p>}
+
             <div className="flex gap-4">
-              <Button variant="secondary" onClick={() => setStep("write")}>
+              <Button variant="secondary" onClick={() => setStep("write")} disabled={posting}>
                 Keep editing
               </Button>
               <Button
-                onClick={() => {
-                  askQuestion({
+                disabled={posting}
+                onClick={async () => {
+                  setPosting(true);
+                  setPostError(null);
+                  const res = await askQuestion({
                     domain,
                     body,
                     isAnonymous: anonymous,
                     responsePreferences: prefs,
                     matchingPreference: matching,
                   });
+                  setPosting(false);
+                  if (!res.ok) {
+                    setPostError(res.error ?? "Couldn't post your question.");
+                    return;
+                  }
+                  setPostedId(res.id ?? null);
                   setStep("posted");
                 }}
               >
-                Post Anonymously →
+                {posting ? "Posting…" : anonymous ? "Post Anonymously →" : "Post →"}
               </Button>
             </div>
           </div>
@@ -238,8 +283,18 @@ function AskContent({ user }: { user: User }) {
           <div className="flex flex-col items-center gap-3 py-24 text-center">
             <p className="font-display text-3xl text-ink">It&apos;s out there now.</p>
             <p className="text-ink-muted">
-              People who understand {domain} will start seeing it.
+              People who understand {domain} will start seeing it. We&apos;ll notify you when a perspective arrives.
             </p>
+            <div className="mt-6 flex gap-6">
+              {postedId && (
+                <Link href={`/question/${postedId}`} className="eyebrow text-forest hover:opacity-75">
+                  View your question →
+                </Link>
+              )}
+              <Link href="/home" className="eyebrow text-ink-faint hover:text-ink">
+                Back home
+              </Link>
+            </div>
           </div>
         )}
       </div>

@@ -31,15 +31,19 @@ export default function OnboardingPage() {
   const { completeOnboarding } = useProfile();
   const [selected, setSelected] = useState<Choice | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function proceed() {
+  async function proceed() {
     if (!selected) return;
     setSubmitting(true);
-    completeOnboarding(selected);
-    setTimeout(() => {
-      if (selected === "ask") router.push("/home");
-      else router.push("/become-replier");
-    }, 400);
+    setError(null);
+    const res = await completeOnboarding(selected);
+    if (!res.ok) {
+      setSubmitting(false);
+      setError(res.error ?? "Something went wrong.");
+      return;
+    }
+    router.push(selected === "ask" ? "/home" : "/become-replier");
   }
 
   return (
@@ -78,6 +82,7 @@ export default function OnboardingPage() {
               ))}
             </div>
 
+            {error && <p className="mt-6 text-center text-sm text-danger">{error}</p>}
             <button
               onClick={proceed}
               disabled={!selected || submitting}

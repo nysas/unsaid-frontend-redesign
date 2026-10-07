@@ -28,6 +28,12 @@ function AssessmentInner() {
   const [phase, setPhase] = useState<Phase>("intro");
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(""));
+  // Completed domains wait here until the whole queue is done, then submit together.
+  const [completed, setCompleted] = useState<
+    { domain: Domain; responses: { questionId: string; answer: string }[] }[]
+  >([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function setAnswer(v: string) {
     setAnswers((cur) => {
@@ -37,20 +43,32 @@ function AssessmentInner() {
     });
   }
 
-  function next() {
+  async function next() {
     if (index < questions.length - 1) {
       setIndex((i) => i + 1);
       return;
     }
     // this domain's assessment is done
+    const done = [
+      ...completed,
+      { domain, responses: questions.map((q, i) => ({ questionId: q.id, answer: answers[i].trim() })) },
+    ];
     if (queueIndex < domainQueue.length - 1) {
+      setCompleted(done);
       const nextDomain = domainQueue[queueIndex + 1];
       setQueueIndex((q) => q + 1);
       setIndex(0);
       setAnswers(Array(assessmentQuestions[nextDomain]?.length ?? 0).fill(""));
       setPhase("intro");
     } else {
-      submitReplierAssessments(domainQueue);
+      setSubmitting(true);
+      setError(null);
+      const res = await submitReplierAssessments(done);
+      setSubmitting(false);
+      if (!res.ok) {
+        setError(res.error ?? "Couldn't submit.");
+        return;
+      }
       router.push("/assessment/result");
     }
   }
@@ -95,6 +113,7 @@ function AssessmentInner() {
               value={answers[index]}
               onChange={setAnswer}
             />
+            {error && <p className="text-sm text-danger">{error}</p>}
             <div className="flex justify-between">
               <Button
                 variant="ghost"
@@ -103,8 +122,10 @@ function AssessmentInner() {
               >
                 Back
               </Button>
-              <Button onClick={next} disabled={answers[index].trim().length < 3}>
-                {isLast
+              <Button onClick={next} disabled={answers[index].trim().length < 3 || submitting}>
+                {submitting
+                  ? "Submitting…"
+                  : isLast
                   ? "Submit Assessment →"
                   : isLastOfDomain
                   ? "Continue →"

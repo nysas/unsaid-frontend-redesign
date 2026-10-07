@@ -1,13 +1,21 @@
 import Link from "next/link";
 import { DomainQualification } from "@/lib/types";
 
+const LABEL: Record<DomainQualification["status"], { text: string; className: string }> = {
+  submitted: { text: "Submitted · in review", className: "text-gold" },
+  qualified: { text: "Qualified", className: "text-forest" },
+  not_qualified: { text: "Not qualified", className: "text-ink-faint" },
+};
+
 export default function QualificationRow({ q }: { q: DomainQualification }) {
+  const label = LABEL[q.status];
   return (
-    <div className="flex items-center justify-between py-3">
-      <span className="text-sm text-ink">{q.domain}</span>
-      <span className="eyebrow text-gold">
-        {q.assessmentCompleted ? "Assessment completed" : "Not assessed"}
-      </span>
+    <div className="py-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-ink">{q.domain}</span>
+        <span className={`eyebrow ${label.className}`}>{label.text}</span>
+      </div>
+      {q.reviewerNote && <p className="mt-1 text-xs text-ink-faint">Reviewer: {q.reviewerNote}</p>}
     </div>
   );
 }

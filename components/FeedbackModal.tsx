@@ -5,20 +5,52 @@ import Button from "@/components/Button";
 import Textarea from "@/components/Textarea";
 import { FEEDBACK_CATEGORIES } from "@/lib/types";
 import clsx from "clsx";
+import { giveFeedback } from "@/lib/api";
+import { friendlyError } from "@/lib/supabase";
 
-export default function FeedbackModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Detailed feedback, shown only to the person who asked the question. */
+export default function FeedbackModal({
+  open,
+  onClose,
+  answerId,
+  onSubmitted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  answerId: string;
+  onSubmitted: () => void;
+}) {
   const [rating, setRating] = useState(0);
   const [categories, setCategories] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function toggle(cat: string) {
     setCategories((c) => (c.includes(cat) ? c.filter((x) => x !== cat) : [...c, cat]));
   }
 
-  function submit() {
+  async function submit() {
+    setSending(true);
+    setError(null);
+    try {
+      await giveFeedback({
+        answerId,
+        helpful: !categories.includes("Wasn't helpful"),
+        rating,
+        categories,
+        note,
+      });
+    } catch (err) {
+      setError(friendlyError(err));
+      setSending(false);
+      return;
+    }
+    setSending(false);
     setSubmitted(true);
     setTimeout(() => {
+      onSubmitted();
       onClose();
       setSubmitted(false);
       setRating(0);
@@ -32,7 +64,7 @@ export default function FeedbackModal({ open, onClose }: { open: boolean; onClos
       {submitted ? (
         <div className="flex flex-col items-center gap-2 py-8 text-center">
           <p className="font-display text-2xl text-ink">Thank you.</p>
-          <p className="text-sm text-ink-muted">It helps repliers know what actually helps.</p>
+          <p className="text-sm text-ink-muted">They&apos;ll see what helped — never who said it.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-6">
@@ -82,8 +114,9 @@ export default function FeedbackModal({ open, onClose }: { open: boolean; onClos
             onChange={(e) => setNote(e.target.value)}
           />
 
-          <Button disabled={rating === 0} onClick={submit} className="w-full">
-            Submit feedback
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button disabled={rating === 0 || sending} onClick={submit} className="w-full">
+            {sending ? "Sending…" : "Submit feedback"}
           </Button>
         </div>
       )}

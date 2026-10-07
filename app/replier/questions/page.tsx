@@ -6,12 +6,18 @@ import Divider from "@/components/Divider";
 import { EmptyState } from "@/components/EmptyState";
 import { ReplierGate } from "@/components/ProfileGate";
 import AuthGate from "@/components/AuthGate";
-import { getQuestionsForDomains } from "@/lib/mock-data";
+import { Loading, LoadError } from "@/components/LoadState";
+import { fetchMatchedQuestions } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { User } from "@/lib/types";
 import { MessageCircle } from "lucide-react";
 
 function ReplierHomeContent({ user }: { user: User }) {
   const router = useRouter();
+  const matched = useAsync(
+    () => (user.replier.active ? fetchMatchedQuestions() : Promise.resolve([])),
+    [user.replier.active]
+  );
 
   if (!user.replier.active) {
     return (
@@ -24,10 +30,7 @@ function ReplierHomeContent({ user }: { user: User }) {
     );
   }
 
-  const assessedDomains = user.replier.qualifications
-    .filter((q) => q.assessmentCompleted)
-    .map((q) => q.domain);
-  const questions = getQuestionsForDomains(assessedDomains);
+  const questions = matched.data ?? [];
 
   return (
     <main>
@@ -45,7 +48,11 @@ function ReplierHomeContent({ user }: { user: User }) {
         </div>
 
         <div className="flex flex-col">
-          {questions.length > 0 ? (
+          {matched.loading ? (
+            <Loading />
+          ) : matched.error ? (
+            <LoadError message={matched.error} onRetry={matched.reload} />
+          ) : questions.length > 0 ? (
             questions.map((q, i) => (
               <div key={q.id}>
                 <div className="py-9">

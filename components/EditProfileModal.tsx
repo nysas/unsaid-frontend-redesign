@@ -24,9 +24,22 @@ function EditProfileForm({
   const [username, setUsername] = useState(initialUsername);
   const [bio, setBio] = useState(initialBio);
   const [markSeed, setMarkSeed] = useState(initialAvatarSeed);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function save() {
-    updateProfile({ username, bio, avatarSeed: markSeed });
+  async function save() {
+    if (!/^[A-Za-z0-9_.]{3,24}$/.test(username)) {
+      setError("Usernames are 3–24 characters: letters, numbers, _ or .");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await updateProfile({ username, bio, avatarSeed: markSeed });
+    setSaving(false);
+    if (!res.ok) {
+      setError(res.error ?? "Couldn't save.");
+      return;
+    }
     onClose();
   }
 
@@ -48,7 +61,11 @@ function EditProfileForm({
           ))}
         </div>
       </div>
-      <Input label="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
+      <Input
+        label="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value.replace(/\s+/g, ""))}
+      />
       <Textarea
         label="Bio"
         placeholder="A short line about how you show up here."
@@ -58,7 +75,10 @@ function EditProfileForm({
         value={bio}
         onChange={(e) => setBio(e.target.value)}
       />
-      <Button onClick={save} className="w-full">Save</Button>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      <Button onClick={save} disabled={saving} className="w-full">
+        {saving ? "Saving…" : "Save"}
+      </Button>
     </div>
   );
 }
